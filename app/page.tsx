@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -12,110 +12,75 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { netToGross, COUNTRY_LABELS, type Country } from '@/lib/tax';
-import { getEurToRsd } from '@/lib/exchange';
+
+// Approximate rate — update manually a few times a year
+const EUR_TO_RSD = 117;
 
 type InputCurrency = 'RSD' | 'EUR';
-const COUNTRIES = Object.entries(COUNTRY_LABELS) as [Country, string][];
+const COUNTRIES = Object.keys(COUNTRY_LABELS) as Country[];
 
 function fmtRSD(value: number) {
   return new Intl.NumberFormat('sr-RS', { maximumFractionDigits: 0 }).format(value) + ' RSD';
 }
 
 function fmtEUR(value: number) {
-  return new Intl.NumberFormat('de-DE', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat('de-DE', {
+    style: 'currency',
+    currency: 'EUR',
+    maximumFractionDigits: 0,
+  }).format(value);
 }
 
 export default function Home() {
-  const [country, setCountry] = useState<Country>('RS');
-  const [inputCurrency, setInputCurrency] = useState<InputCurrency>('RSD');
   const [netInput, setNetInput] = useState('');
-  const [eurToRsd, setEurToRsd] = useState<number | null>(null);
-  const [rateDate, setRateDate] = useState<string | null>(null);
-  const [rateError, setRateError] = useState(false);
+  const [inputCurrency, setInputCurrency] = useState<InputCurrency>('EUR');
 
-  useEffect(() => {
-    getEurToRsd()
-      .then((rate) => {
-        setEurToRsd(rate);
-        setRateDate(new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }));
-      })
-      .catch(() => setRateError(true));
-  }, []);
+  const results = useMemo(() => {
+    const amount = parseFloat(netInput.replace(/,/g, ''));
+    if (!amount || amount <= 0) return null;
 
-  const result = useMemo(() => {
-    const net = parseFloat(netInput.replace(/,/g, ''));
-    if (!net || net <= 0 || !eurToRsd) return null;
+    // Convert input to each country's native currency for tax calc
+    return COUNTRIES.map((country) => {
+      const isSerbia = country === 'RS';
+      const nativeNet = isSerbia
+        ? (inputCurrency === 'EUR' ? amount * EUR_TO_RSD : amount)
+        : (inputCurrency === 'RSD' ? amount / EUR_TO_RSD : amount);
 
-    // The tax functions always work in the country's native currency.
-    // Serbia = RSD, others = EUR. Convert input if needed.
-    const isSerbia = country === 'RS';
-    const nativeNet = isSerbia
-      ? (inputCurrency === 'EUR' ? net * eurToRsd : net)
-      : (inputCurrency === 'RSD' ? net / eurToRsd : net);
+      const { grossMonthly, grossAnnual } = netToGross(country, nativeNet);
 
-    const taxResult = netToGross(country, nativeNet);
-    const grossMonthly = taxResult.grossMonthly;
-    const grossYearly = taxResult.grossAnnual;
+      const grossMonthlyRSD = isSerbia ? grossMonthly : grossMonthly * EUR_TO_RSD;
+      const grossMonthlyEUR = isSerbia ? grossMonthly / EUR_TO_RSD : grossMonthly;
 
-    if (isSerbia) {
       return {
-        grossMonthly,
-        grossYearly,
-        grossMonthlyAlt: grossMonthly / eurToRsd,
-        grossYearlyAlt: grossYearly / eurToRsd,
-        primaryFmt: fmtRSD,
-        altFmt: fmtEUR,
-        altLabel: 'EUR equivalent',
+        country,
+        label: COUNTRY_LABELS[country],
+        grossMonthlyRSD,
+        grossMonthlyEUR,
+        grossYearlyRSD: grossMonthlyRSD * 12,
+        grossYearlyEUR: grossMonthlyEUR * 12,
       };
-    } else {
-      return {
-        grossMonthly,
-        grossYearly,
-        grossMonthlyAlt: grossMonthly * eurToRsd,
-        grossYearlyAlt: grossYearly * eurToRsd,
-        primaryFmt: fmtEUR,
-        altFmt: fmtRSD,
-        altLabel: 'RSD equivalent',
-      };
-    }
-  }, [netInput, country, inputCurrency, eurToRsd]);
-
-  const placeholder = inputCurrency === 'RSD' ? 'e.g. 150,000' : 'e.g. 3,000';
+    });
+  }, [netInput, inputCurrency]);
 
   return (
     <main className="min-h-screen bg-white flex items-center justify-center p-6">
-      <div className="w-full max-w-md space-y-6">
+      <div className="w-full max-w-lg space-y-8">
 
         <div>
           <h1 className="text-2xl font-semibold text-zinc-900">Salary Calculator</h1>
           <p className="text-sm text-zinc-500 mt-1">
-            Enter your desired net monthly salary to see the gross equivalent.
+            Enter your desired net monthly salary to see what gross you need to earn in each country.
           </p>
         </div>
 
         <Card className="border border-zinc-200 shadow-none">
           <CardContent className="pt-6 space-y-4">
-
-            <div className="space-y-1.5">
-              <Label>Country</Label>
-              <Select value={country} onValueChange={(v) => { setCountry(v as Country); setNetInput(''); }}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {COUNTRIES.map(([code, label]) => (
-                    <SelectItem key={code} value={code}>{label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             <div className="space-y-1.5">
               <Label>Desired net monthly salary</Label>
               <div className="flex gap-2">
                 <Input
                   type="number"
-                  placeholder={placeholder}
+                  placeholder={inputCurrency === 'EUR' ? 'e.g. 3,000' : 'e.g. 150,000'}
                   value={netInput}
                   onChange={(e) => setNetInput(e.target.value)}
                   className="flex-1"
@@ -125,68 +90,41 @@ export default function Home() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="RSD">RSD</SelectItem>
                     <SelectItem value="EUR">EUR</SelectItem>
+                    <SelectItem value="RSD">RSD</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
-
-            {rateDate && !rateError && (
-              <p className="text-xs text-zinc-400">
-                Rate as of {rateDate}: 1 EUR = {eurToRsd?.toFixed(2)} RSD
-              </p>
-            )}
-            {rateError && (
-              <p className="text-xs text-red-400">Could not fetch live exchange rate.</p>
-            )}
-
+            <p className="text-xs text-zinc-400">Rate used: 1 EUR = {EUR_TO_RSD} RSD</p>
           </CardContent>
         </Card>
 
-        {result && (
+        {results && (
           <div className="space-y-3">
-            <Row
-              label="Gross monthly"
-              primary={result.primaryFmt(result.grossMonthly)}
-              alt={result.altFmt(result.grossMonthlyAlt)}
-              altLabel={result.altLabel}
-              highlight
-            />
-            <Row
-              label="Gross yearly"
-              primary={result.primaryFmt(result.grossYearly)}
-              alt={result.altFmt(result.grossYearlyAlt)}
-              altLabel={result.altLabel}
-            />
+            {results.map(({ country, label, grossMonthlyEUR, grossMonthlyRSD, grossYearlyEUR, grossYearlyRSD }) => (
+              <Card key={country} className="border border-zinc-200 shadow-none">
+                <CardContent className="py-4 px-5">
+                  <p className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">{label}</p>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-zinc-500 mb-0.5">Gross monthly</p>
+                      <p className="text-base font-semibold text-zinc-900">{fmtEUR(grossMonthlyEUR)}</p>
+                      <p className="text-xs text-zinc-400">{fmtRSD(grossMonthlyRSD)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-zinc-500 mb-0.5">Gross yearly</p>
+                      <p className="text-base font-semibold text-zinc-900">{fmtEUR(grossYearlyEUR)}</p>
+                      <p className="text-xs text-zinc-400">{fmtRSD(grossYearlyRSD)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         )}
 
       </div>
     </main>
-  );
-}
-
-function Row({
-  label,
-  primary,
-  alt,
-  altLabel,
-  highlight,
-}: {
-  label: string;
-  primary: string;
-  alt: string;
-  altLabel: string;
-  highlight?: boolean;
-}) {
-  return (
-    <Card className={`border shadow-none ${highlight ? 'border-zinc-900 bg-zinc-900' : 'border-zinc-200'}`}>
-      <CardContent className="py-4 px-5">
-        <p className={`text-xs mb-0.5 ${highlight ? 'text-zinc-400' : 'text-zinc-500'}`}>{label}</p>
-        <p className={`text-xl font-semibold ${highlight ? 'text-white' : 'text-zinc-900'}`}>{primary}</p>
-        <p className={`text-xs mt-0.5 ${highlight ? 'text-zinc-500' : 'text-zinc-400'}`}>{altLabel}: {alt}</p>
-      </CardContent>
-    </Card>
   );
 }
