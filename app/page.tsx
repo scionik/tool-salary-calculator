@@ -14,6 +14,7 @@ import {
 import { netToGross, COUNTRY_LABELS, type Country } from '@/lib/tax';
 import { getEurToRsd } from '@/lib/exchange';
 
+type InputCurrency = 'RSD' | 'EUR';
 const COUNTRIES = Object.entries(COUNTRY_LABELS) as [Country, string][];
 
 function fmtRSD(value: number) {
@@ -26,12 +27,11 @@ function fmtEUR(value: number) {
 
 export default function Home() {
   const [country, setCountry] = useState<Country>('RS');
+  const [inputCurrency, setInputCurrency] = useState<InputCurrency>('RSD');
   const [netInput, setNetInput] = useState('');
   const [eurToRsd, setEurToRsd] = useState<number | null>(null);
   const [rateDate, setRateDate] = useState<string | null>(null);
   const [rateError, setRateError] = useState(false);
-
-  const isSerbia = country === 'RS';
 
   useEffect(() => {
     getEurToRsd()
@@ -46,10 +46,14 @@ export default function Home() {
     const net = parseFloat(netInput.replace(/,/g, ''));
     if (!net || net <= 0 || !eurToRsd) return null;
 
-    // Normalize input to EUR for non-Serbia, RSD for Serbia
-    const netMonthly = net;
-    const taxResult = netToGross(country, isSerbia ? netMonthly : netMonthly);
+    // The tax functions always work in the country's native currency.
+    // Serbia = RSD, others = EUR. Convert input if needed.
+    const isSerbia = country === 'RS';
+    const nativeNet = isSerbia
+      ? (inputCurrency === 'EUR' ? net * eurToRsd : net)
+      : (inputCurrency === 'RSD' ? net / eurToRsd : net);
 
+    const taxResult = netToGross(country, nativeNet);
     const grossMonthly = taxResult.grossMonthly;
     const grossYearly = taxResult.grossAnnual;
 
@@ -74,10 +78,9 @@ export default function Home() {
         altLabel: 'RSD equivalent',
       };
     }
-  }, [netInput, country, eurToRsd, isSerbia]);
+  }, [netInput, country, inputCurrency, eurToRsd]);
 
-  const currency = isSerbia ? 'RSD' : 'EUR';
-  const placeholder = isSerbia ? 'e.g. 150,000' : 'e.g. 3,000';
+  const placeholder = inputCurrency === 'RSD' ? 'e.g. 150,000' : 'e.g. 3,000';
 
   return (
     <main className="min-h-screen bg-white flex items-center justify-center p-6">
@@ -108,18 +111,30 @@ export default function Home() {
             </div>
 
             <div className="space-y-1.5">
-              <Label>Desired net monthly salary ({currency})</Label>
-              <Input
-                type="number"
-                placeholder={placeholder}
-                value={netInput}
-                onChange={(e) => setNetInput(e.target.value)}
-              />
+              <Label>Desired net monthly salary</Label>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  placeholder={placeholder}
+                  value={netInput}
+                  onChange={(e) => setNetInput(e.target.value)}
+                  className="flex-1"
+                />
+                <Select value={inputCurrency} onValueChange={(v) => { setInputCurrency(v as InputCurrency); setNetInput(''); }}>
+                  <SelectTrigger className="w-24">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="RSD">RSD</SelectItem>
+                    <SelectItem value="EUR">EUR</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             {rateDate && !rateError && (
               <p className="text-xs text-zinc-400">
-                Exchange rate as of {rateDate}: 1 EUR = {eurToRsd?.toFixed(2)} RSD
+                Rate as of {rateDate}: 1 EUR = {eurToRsd?.toFixed(2)} RSD
               </p>
             )}
             {rateError && (
@@ -167,12 +182,10 @@ function Row({
 }) {
   return (
     <Card className={`border shadow-none ${highlight ? 'border-zinc-900 bg-zinc-900' : 'border-zinc-200'}`}>
-      <CardContent className="py-4 px-5 flex items-center justify-between">
-        <div>
-          <p className={`text-xs mb-0.5 ${highlight ? 'text-zinc-400' : 'text-zinc-500'}`}>{label}</p>
-          <p className={`text-xl font-semibold ${highlight ? 'text-white' : 'text-zinc-900'}`}>{primary}</p>
-          <p className={`text-xs mt-0.5 ${highlight ? 'text-zinc-500' : 'text-zinc-400'}`}>{altLabel}: {alt}</p>
-        </div>
+      <CardContent className="py-4 px-5">
+        <p className={`text-xs mb-0.5 ${highlight ? 'text-zinc-400' : 'text-zinc-500'}`}>{label}</p>
+        <p className={`text-xl font-semibold ${highlight ? 'text-white' : 'text-zinc-900'}`}>{primary}</p>
+        <p className={`text-xs mt-0.5 ${highlight ? 'text-zinc-500' : 'text-zinc-400'}`}>{altLabel}: {alt}</p>
       </CardContent>
     </Card>
   );
